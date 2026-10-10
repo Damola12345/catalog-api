@@ -141,7 +141,7 @@ jobs:
           provenance: false
 
       - name: Trivy image scan (report → Security tab)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.local }}
           format: sarif
@@ -157,7 +157,7 @@ jobs:
           category: trivy-image
 
       - name: Trivy image scan (gate — fail on fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ steps.meta.outputs.local }}
           format: table
@@ -165,10 +165,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      # ---- publish: only on main, never from PRs ----------------------------
-      # Prints the exact `sub` claim GitHub issues for this run (not the token).
-      # If AssumeRoleWithWebIdentity is denied, compare this line with the
-      # `ci_trusted_subjects` Terraform output — they must match exactly.
+      # publish:
       - name: Show OIDC subject
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
