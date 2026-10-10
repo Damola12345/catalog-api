@@ -1,0 +1,205 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Least privilege by default; jobs opt in to what they need.
+permissions:
+  contents: read
+
+# One run per ref; a new push to a PR cancels the stale run. Never cancel main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_NAME: catalog-api
+  GO_VERSION: "1.24"
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  #
+  lint-test:
+    name: Lint & test (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: app/go.mod
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::run gofmt"; exit 1; }
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1
+          working-directory: app
+
+      - name: Test (race detector + coverage)
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1 >> "$GITHUB_STEP_SUMMARY"
+
+  # 
+  lint-config:
+    name: Lint Dockerfile, Kubernetes & Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+
+      - name: Validate Kubernetes manifests (kubeconform, strict)
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          for k in k8s/base k8s/overlays/local; do
+            echo "== $k"
+            kubectl kustomize "$k" | ./kubeconform -strict -summary -kubernetes-version 1.30.0 -
+          done
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive terraform/
+
+      - name: terraform validate (every root module)
+        run: |
+          for dir in terraform/bootstrap terraform/live; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+      - name: Trivy IaC misconfiguration scan (k8s + terraform + Dockerfile)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  #
+  build-scan-push:
+    name: Build, scan & push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint-test, lint-config]
+    permissions:
+      contents: read
+      id-token: write         # GitHub OIDC → AWS STS (no long-lived keys)
+      security-events: write  # upload Trivy SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "registry=${REGISTRY}"                                  >> "$GITHUB_OUTPUT"
+          echo "local=${IMAGE_NAME}:${SHORT_SHA}"                      >> "$GITHUB_OUTPUT"
+          echo "remote=${REGISTRY}/${IMAGE_NAME}:sha-${SHORT_SHA}"     >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}"                                >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build ONCE and load into the local daemon. The exact bytes we scan are
+      # the bytes we push — no rebuild between scan and publish.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.local }}
+          build-args: VERSION=${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Trivy image scan (report → Security tab)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.local }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF
+        if: always() && github.event.pull_request.head.repo.fork != true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      - name: Trivy image scan (gate — fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.local }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # ---- publish: only on main, never from PRs ----------------------------
+      # Prints the exact `sub` claim GitHub issues for this run (not the token).
+      # If AssumeRoleWithWebIdentity is denied, compare this line with the
+      # `ci_trusted_subjects` Terraform output — they must match exactly.
+      - name: Show OIDC subject
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          echo "::add-mask::$TOKEN"
+          SUB=$(python3 -c 'import sys,json,base64; p=sys.argv[1].split(".")[1]; p+="="*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))["sub"])' "$TOKEN")
+          echo "OIDC sub: $SUB"
+          echo "OIDC sub claim: \`$SUB\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+          mask-aws-account-id: true
+
+      - name: Log in to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag "${{ steps.meta.outputs.local }}" "${{ steps.meta.outputs.remote }}"
+          docker push "${{ steps.meta.outputs.remote }}"
+          # Summary shows only the tag: the registry host contains the account ID.
+          {
+            echo "### Image pushed"
+            echo "Tag: \`${IMAGE_NAME}:sha-${{ steps.meta.outputs.short_sha }}\`"
+            echo "Deploy: \`cd k8s/base && kustomize edit set image catalog-api=<registry>/${IMAGE_NAME}:sha-${{ steps.meta.outputs.short_sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

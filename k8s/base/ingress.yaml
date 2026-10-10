@@ -1,0 +1,27 @@
+# Assumes ingress-nginx and cert-manager are installed cluster-wide (platform
+# components, not owned by this service). Hostname is a placeholder.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: catalog-api
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m   # matches the app's MaxBytesReader
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - catalog.example.com
+      secretName: catalog-api-tls
+  rules:
+    - host: catalog.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog-api
+                port:
+                  name: http

@@ -1,0 +1,23 @@
+# Single-node kind cluster for local verification.
+# - Default CNI disabled so Calico can be installed: it enforces
+#   NetworkPolicy and leaves kubelet→pod probe traffic alone.
+# - Host port 8080 → node port 80 for the ingress controller
+#   (8080 avoids needing port 80 free / root on the host).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: catalog
+networking:
+  disableDefaultCNI: true
+  podSubnet: 192.168.0.0/16   # Calico's default IP pool
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP

@@ -1,0 +1,41 @@
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: Deployment
+      name: catalog-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: catalog-api:local
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+
+  - target:
+      kind: Ingress
+      name: catalog-api
+    patch: |-
+      - op: remove
+        path: /spec/tls
+      - op: replace
+        path: /spec/rules/0/host
+        value: catalog.localtest.me
+      - op: remove
+        path: /metadata/annotations/cert-manager.io~1cluster-issuer
+      - op: replace
+        path: /metadata/annotations/nginx.ingress.kubernetes.io~1force-ssl-redirect
+        value: "false"
+
+  - target:
+      kind: Secret
+      name: catalog-api-secrets
+    patch: |-
+      - op: replace
+        path: /stringData/API_KEY
+        value: local-test-key
