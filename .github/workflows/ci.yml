@@ -18,7 +18,7 @@ concurrency:
 
 env:
   IMAGE_NAME: catalog-api
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.27"
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
@@ -45,7 +45,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1
+          version: latest
           working-directory: app
           verify: false
 

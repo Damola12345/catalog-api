@@ -3,7 +3,7 @@
 
 # build stage 
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Dependency layer first so it is cached independently of source changes.
