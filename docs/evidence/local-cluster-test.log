@@ -1,0 +1,204 @@
+
+[1m══════════════════════════════════════════════════════════════
+ SETUP  cluster, CNI (Calico), ingress-nginx, image
+══════════════════════════════════════════════════════════════[0m
+cluster 'catalog' already exists — reusing it
+Installing Calico v3.28.2 (enforces NetworkPolicy)...
+daemon set "calico-node" successfully rolled out
+node/catalog-control-plane condition met
+Installing ingress-nginx controller-v1.12.1...
+pod/ingress-nginx-controller-8545d84968-c2cjl condition met
+job.batch/ingress-nginx-admission-create condition met
+job.batch/ingress-nginx-admission-patch condition met
+Pulling CI-built image from ECR (tag: sha-c2f3a0a) and loading it into kind...
+Image: "catalog-api:local" with ID "sha256:82412fe5328870524e0a38eab622a98a682e437816c05ce7d66852252300f253" not yet present on node "catalog-control-plane", loading...
+
+[1m══════════════════════════════════════════════════════════════
+ 1. DEPLOY  kubectl apply -k k8s/overlays/local
+══════════════════════════════════════════════════════════════[0m
+namespace/catalog created
+serviceaccount/catalog-api created
+configmap/catalog-api-config created
+secret/catalog-api-secrets created
+service/catalog-api created
+deployment.apps/catalog-api created
+poddisruptionbudget.policy/catalog-api created
+ingress.networking.k8s.io/catalog-api created
+networkpolicy.networking.k8s.io/catalog-api created
+networkpolicy.networking.k8s.io/default-deny-all created
+[1m$ kubectl -n catalog rollout status deploy/catalog-api --timeout=180s[0m
+Waiting for deployment "catalog-api" rollout to finish: 0 of 2 updated replicas are available...
+deployment "catalog-api" successfully rolled out
+
+[1m══════════════════════════════════════════════════════════════
+ 2. RESOURCES  everything the manifests created
+══════════════════════════════════════════════════════════════[0m
+[1m$ kubectl get nodes -o wide[0m
+NAME                    STATUS   ROLES           AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION    CONTAINER-RUNTIME
+catalog-control-plane   Ready    control-plane   3h42m   v1.31.4   172.18.0.5    <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit   containerd://1.7.24
+
+[1m$ kubectl -n catalog get deploy,rs,pods,svc,ingress,networkpolicy,configmap,secret,pdb,sa -o wide[0m
+NAME                          READY   UP-TO-DATE   AVAILABLE   AGE    CONTAINERS    IMAGES              SELECTOR
+deployment.apps/catalog-api   2/2     2            2           117s   catalog-api   catalog-api:local   app.kubernetes.io/name=catalog-api
+
+NAME                                     DESIRED   CURRENT   READY   AGE    CONTAINERS    IMAGES              SELECTOR
+replicaset.apps/catalog-api-64d8bc8b8f   2         2         2       117s   catalog-api   catalog-api:local   app.kubernetes.io/name=catalog-api,pod-template-hash=64d8bc8b8f
+
+NAME                               READY   STATUS    RESTARTS   AGE    IP              NODE                    NOMINATED NODE   READINESS GATES
+pod/catalog-api-64d8bc8b8f-ghb92   1/1     Running   0          117s   192.168.21.72   catalog-control-plane   <none>           <none>
+pod/catalog-api-64d8bc8b8f-sd4hk   1/1     Running   0          117s   192.168.21.73   catalog-control-plane   <none>           <none>
+
+NAME                  TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE    SELECTOR
+service/catalog-api   ClusterIP   10.96.151.244   <none>        80/TCP    118s   app.kubernetes.io/name=catalog-api
+
+NAME                                    CLASS   HOSTS                  ADDRESS     PORTS   AGE
+ingress.networking.k8s.io/catalog-api   nginx   catalog.localtest.me   localhost   80      117s
+
+NAME                                               POD-SELECTOR                         AGE
+networkpolicy.networking.k8s.io/catalog-api        app.kubernetes.io/name=catalog-api   117s
+networkpolicy.networking.k8s.io/default-deny-all   <none>                               117s
+
+NAME                           DATA   AGE
+configmap/catalog-api-config   4      118s
+configmap/kube-root-ca.crt     1      118s
+
+NAME                         TYPE     DATA   AGE
+secret/catalog-api-secrets   Opaque   1      118s
+
+NAME                                     MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/catalog-api   1               N/A               1                     117s
+
+NAME                         SECRETS   AGE
+serviceaccount/catalog-api   0         118s
+serviceaccount/default       0         118s
+
+[1m$ kubectl get ns catalog --show-labels[0m
+NAME      STATUS   AGE   LABELS
+catalog   Active   2m    app.kubernetes.io/managed-by=kustomize,app.kubernetes.io/part-of=catalog,kubernetes.io/metadata.name=catalog,pod-security.kubernetes.io/audit=restricted,pod-security.kubernetes.io/enforce-version=latest,pod-security.kubernetes.io/enforce=restricted,pod-security.kubernetes.io/warn=restricted
+
+[1m══════════════════════════════════════════════════════════════
+ 3. DEPLOYMENT SPEC  requests/limits, probes, env from ConfigMap/Secret
+══════════════════════════════════════════════════════════════[0m
+[1m$ kubectl -n catalog describe deploy catalog-api[0m
+Pod Template:
+  Labels:           app.kubernetes.io/name=catalog-api
+  Service Account:  catalog-api
+  Containers:
+   catalog-api:
+    Image:      catalog-api:local
+    Port:       8080/TCP (http)
+    Host Port:  0/TCP (http)
+    Limits:
+      cpu:     500m
+      memory:  128Mi
+    Requests:
+      cpu:      50m
+      memory:   32Mi
+    Liveness:   http-get http://:http/healthz delay=0s timeout=2s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:http/readyz delay=0s timeout=2s period=5s #success=1 #failure=2
+    Startup:    http-get http://:http/healthz delay=0s timeout=1s period=2s #success=1 #failure=15
+    Environment Variables from:
+      catalog-api-config  ConfigMap  Optional: false
+    Environment:
+      API_KEY:                  <set to the key 'API_KEY' in secret 'catalog-api-secrets'>  Optional: false
+      GOMAXPROCS:               1 (limits.cpu)
+      GOMEMLIMIT:               134217728 (limits.memory)
+    Mounts:                     <none>
+  Volumes:                      <none>
+
+Pod security context on catalog-api-64d8bc8b8f-ghb92:
+pod:       {"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}
+container: {"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"privileged":false,"readOnlyRootFilesystem":true}
+[32m✔ PASS[0m  2/2 replicas Ready (readiness probe passing)
+[32m✔ PASS[0m  0 restarts (liveness probe passing)
+
+[1m══════════════════════════════════════════════════════════════
+ 4. APP THROUGH THE INGRESS  (http://localhost:8080, Host: catalog.localtest.me)
+══════════════════════════════════════════════════════════════[0m
+[1m$ curl -s -H Host: catalog.localtest.me http://localhost:8080/readyz[0m
+{"service":"catalog-api","status":"ready"}
+
+[1m$ curl -s -H Host: catalog.localtest.me http://localhost:8080/api/v1/items[0m
+[{"id":1,"name":"widget","price":9.99},{"id":2,"name":"gadget","price":24.5}]
+
+[1m$ curl -s -H Host: catalog.localtest.me http://localhost:8080/api/v1/items/1[0m
+{"id":1,"name":"widget","price":9.99}
+
+
+[32m✔ PASS[0m  GET /healthz → 200
+[32m✔ PASS[0m  GET /readyz → 200
+[32m✔ PASS[0m  GET /api/v1/items → 200
+[32m✔ PASS[0m  GET /api/v1/items/999 → 404
+[32m✔ PASS[0m  POST without API key → 401 (Secret-backed auth enforced)
+
+[1m$ curl -s -X POST -H Host: catalog.localtest.me -H X-API-Key: local-test-key -d {"name":"from-test","price":1.5} http://localhost:8080/api/v1/items[0m
+{"id":3,"name":"from-test","price":1.5}
+
+[32m✔ PASS[0m  POST with API key from Secret → 201
+
+[1m══════════════════════════════════════════════════════════════
+ 5. NETWORKPOLICY — INGRESS  only ingress-nginx may reach the pods
+══════════════════════════════════════════════════════════════[0m
+Allowed path (ingress-nginx → pod) was proven in section 4.
+Now a pod in the 'default' namespace calls the Service directly:
+
+[1m$ kubectl run np-ingress-test -n default --rm -i --restart=Never --quiet --image=curlimages/curl:8.10.1 -- curl -sS -m 5 http://catalog-api.catalog.svc.cluster.local/healthz[0m
+curl: (28) Connection timed out after 5002 milliseconds
+pod default/np-ingress-test terminated (Error)
+
+[32m✔ PASS[0m  direct pod→Service traffic from another namespace is BLOCKED (curl exit 28)
+
+[1m══════════════════════════════════════════════════════════════
+ 6. NETWORKPOLICY — EGRESS  catalog-api may only resolve DNS
+══════════════════════════════════════════════════════════════[0m
+[1m$ kubectl -n catalog debug catalog-api-64d8bc8b8f-ghb92 --profile=restricted --image=busybox:1.36 --container=np-egress-17504 --attach=false -- sh -c 
+    echo "--- DNS lookup (should SUCCEED: egress to kube-dns allowed)";
+    nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1 && echo DNS_OK || echo DNS_BLOCKED;
+    # A NetworkPolicy drop shows up as a connection timeout; any other result
+    # (success, HTTP error, TLS error) means the packet got through.
+    probe() { r=$(wget -q -T 5 -O /dev/null "$1" 2>&1); case "$r" in *"timed out"*) echo "$2_BLOCKED";; *) echo "$2_OPEN ($r)";; esac; };
+    echo "--- HTTP to the internet (should be BLOCKED)";
+    probe http://example.com INTERNET;
+    echo "--- Kubernetes API server on :443 (should be BLOCKED)";
+    probe http://kubernetes.default.svc:443 APISERVER[0m
+--- DNS lookup (should SUCCEED: egress to kube-dns allowed)
+DNS_OK
+--- HTTP to the internet (should be BLOCKED)
+INTERNET_BLOCKED
+--- Kubernetes API server on :443 (should be BLOCKED)
+APISERVER_BLOCKED
+
+[32m✔ PASS[0m  DNS to kube-dns ALLOWED
+[32m✔ PASS[0m  egress to the internet BLOCKED
+[32m✔ PASS[0m  egress to the K8s API BLOCKED
+
+[1m══════════════════════════════════════════════════════════════
+ 7. ZERO-DOWNTIME ROLLOUT  requests keep succeeding during a restart
+══════════════════════════════════════════════════════════════[0m
+[1m$ kubectl -n catalog rollout restart deploy/catalog-api[0m
+deployment.apps/catalog-api restarted
+[1m$ kubectl -n catalog rollout status deploy/catalog-api --timeout=120s[0m
+Waiting for deployment spec update to be observed...
+Waiting for deployment spec update to be observed...
+Waiting for deployment "catalog-api" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "catalog-api" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "catalog-api" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "catalog-api" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "catalog-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "catalog-api" rollout to finish: 1 old replicas are pending termination...
+deployment "catalog-api" successfully rolled out
+
+requests during rollout: 283   200 OK: 283   errors: 0
+[32m✔ PASS[0m  rolling restart with 0 failed requests (readiness drain + maxUnavailable: 0)
+
+[1m$ kubectl -n catalog get pods -l app.kubernetes.io/name=catalog-api[0m
+NAME                           READY   STATUS    RESTARTS   AGE
+catalog-api-68dd854779-m9kz6   1/1     Running   0          42s
+catalog-api-68dd854779-vr422   1/1     Running   0          35s
+
+[1m══════════════════════════════════════════════════════════════
+ SUMMARY
+══════════════════════════════════════════════════════════════[0m
+[32m13 passed[0m, [32m0 failed[0m
+Full log: docs/evidence/local-cluster-test.log
+Tear down: ./scripts/local-cluster-test.sh cleanup

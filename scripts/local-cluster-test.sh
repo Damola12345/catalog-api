@@ -5,7 +5,6 @@
 #   ECR_IMAGE=<registry>/catalog-api:sha-<commit> ./scripts/local-cluster-test.sh
 #                                            # deploy the CI-built image from ECR instead of building locally
 
-
 set -euo pipefail
 
 CLUSTER=catalog
@@ -42,7 +41,7 @@ show()    { printf '%s$ %s%s\n' "$BOLD" "$*" "$RESET"; "$@"; }
 # local DNS issues with localtest.me).
 status()  { curl -s -o /dev/null -w '%{http_code}' -H "Host: $HOST" "$@"; }
 
-# 
+#
 section "SETUP  cluster, CNI (Calico), ingress-nginx, image"
 
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
@@ -52,12 +51,12 @@ else
 fi
 kubectl config use-context "kind-$CLUSTER" >/dev/null
 
-echo "Installing Calico $CALICO_VERSION (enforces NetworkPolicy)…"
+echo "Installing Calico ${CALICO_VERSION} (enforces NetworkPolicy)..."
 kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/calico.yaml" >/dev/null
 kubectl -n kube-system rollout status ds/calico-node --timeout=900s
 kubectl wait --for=condition=Ready nodes --all --timeout=180s
 
-echo "Installing ingress-nginx $INGRESS_NGINX_VERSION…"
+echo "Installing ingress-nginx ${INGRESS_NGINX_VERSION}..."
 kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/$INGRESS_NGINX_VERSION/deploy/static/provider/kind/deploy.yaml" >/dev/null
 kubectl -n ingress-nginx wait --for=condition=Ready pod \
   -l app.kubernetes.io/component=controller --timeout=900s
@@ -66,11 +65,11 @@ kubectl -n ingress-nginx wait --for=condition=Complete job --all --timeout=120s 
 if [[ -n "${ECR_IMAGE:-}" ]]; then
   # Deploy the exact image CI built, scanned and pushed (no local build).
   # Only the tag is printed: the registry host contains the AWS account ID.
-  echo "Pulling CI-built image from ECR (tag: ${ECR_IMAGE##*:}) and loading it into kind…"
+  echo "Pulling CI-built image from ECR (tag: ${ECR_IMAGE##*:}) and loading it into kind..."
   docker pull -q "$ECR_IMAGE" >/dev/null
   docker tag "$ECR_IMAGE" "$IMAGE"
 else
-  echo "Building $IMAGE from docker/Dockerfile and loading it into kind…"
+  echo "Building $IMAGE from docker/Dockerfile and loading it into kind..."
   # --provenance/--sbom off: attestation manifests make `kind load` fail on
   # Docker Desktop with the containerd image store enabled.
   docker build -q --provenance=false --sbom=false -f docker/Dockerfile \
@@ -78,7 +77,7 @@ else
 fi
 kind load docker-image "$IMAGE" --name "$CLUSTER"
 
-# 
+#
 section "1. DEPLOY  kubectl apply -k k8s/overlays/local"
 
 # Namespace first so PSA labels exist before pods are admitted; the admission
@@ -114,7 +113,7 @@ READY=$(kubectl -n "$NS" get deploy catalog-api -o jsonpath='{.status.readyRepli
 RESTARTS=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=catalog-api -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{" "}{end}')
 [[ "$RESTARTS" =~ ^(0\ )+$ ]] && pass "0 restarts (liveness probe passing)" || fail "unexpected restarts: $RESTARTS"
 
-# 
+#
 section "4. APP THROUGH THE INGRESS  ($INGRESS_URL, Host: $HOST)"
 
 show curl -s -H "Host: $HOST" "$INGRESS_URL/readyz"; echo
