@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars. Nothing here is secret, but it is account-specific.
+github_org  = "Damola12345"
+github_repo = "catalog-api"
+environment = "shared"
+
+
+github_owner_id = 
+github_repo_id  =  # REPLACE with the repo id
+
+# create_github_oidc_provider = false
