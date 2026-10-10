@@ -187,11 +187,11 @@ jobs:
           mask-aws-account-id: true
 
       - name: Log in to ECR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
           docker tag "${{ steps.meta.outputs.local }}" "${{ steps.meta.outputs.remote }}"
           docker push "${{ steps.meta.outputs.remote }}"
