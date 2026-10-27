@@ -4,15 +4,15 @@ A small REST API taken through the full onboarding path: **container → CI pipe
 
 **Status: all parts working and verified.** CI is green and pushes to ECR via OIDC, the Terraform is applied in AWS, the Kubernetes manifests pass 13/13 end-to-end checks, and Argo CD deploys every new image automatically (GitOps). See [Evidence](#evidence).
 
-| Brief requirement | Where |
+| Area | Where |
 |---|---|
-| 1. Containerisation | [`docker/`](docker/) |
-| 2. CI pipeline | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
-| 3. Kubernetes manifests | [`k8s/base/`](k8s/base/) |
-| 4. Terraform (registry, CI role, state bucket) | [`terraform/`](terraform/) |
-| Migration question | [Importing an existing resource](#importing-an-existing-resource-into-terraform) |
-| Bonus: GitOps with Argo CD | [GitOps](#6-gitops-argo-cd) |
-| Assumptions and trade-offs | [Assumptions and trade-offs](#assumptions-and-trade-offs) |
+| Container (distroless, non-root) | `docker/` |
+| CI: lint, test, Trivy scan, OIDC push to ECR | `.github/workflows/ci.yml` |
+| Hardened Kubernetes manifests | `k8s/base/` |
+| Terraform: ECR, CI role, state bucket | `terraform/` |
+| GitOps with Argo CD | [GitOps](#6-gitops-argo-cd) |
+| Importing existing resources into Terraform | [Importing](#importing-an-existing-resource-into-terraform) |
+| Assumptions and trade-offs | [Trade-offs](#assumptions-and-trade-offs) |
 
 ```
 app/                 Go REST API + unit tests
