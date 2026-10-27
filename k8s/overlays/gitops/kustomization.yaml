@@ -1,0 +1,11 @@
+# Entry point Argo CD renders (spec.source.path).
+#
+# Intentionally thin: Argo CD injects the ECR registry here at render time
+# (spec.source.kustomize.images), so the account ID never lands in Git.
+# The release tag lives one level down, in release/kustomization.yaml, so the
+# registry override can't overwrite it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - release

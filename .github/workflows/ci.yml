@@ -73,7 +73,7 @@ jobs:
       - name: Validate Kubernetes manifests (kubeconform, strict)
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
-          for k in k8s/base k8s/overlays/local; do
+          for k in k8s/base k8s/overlays/local k8s/overlays/gitops; do
             echo "== $k"
             kubectl kustomize "$k" | ./kubeconform -strict -summary -kubernetes-version 1.30.0 -
           done
@@ -202,3 +202,32 @@ jobs:
             echo "Tag: \`${IMAGE_NAME}:sha-${{ steps.meta.outputs.short_sha }}\`"
             echo "Deploy: \`cd k8s/base && kustomize edit set image catalog-api=<registry>/${IMAGE_NAME}:sha-${{ steps.meta.outputs.short_sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  
+
+  # GitOps  CI never touches the cluster. It records the new image tag
+  # in Git; Argo CD notices the commit and rolls it out.
+  update-gitops-tag:
+    name: Bump GitOps image tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-scan-push]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      contents: write   # push the tag-bump commit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit the new image tag
+        run: |
+          TAG="sha-${GITHUB_SHA::7}"
+          FILE=k8s/overlays/gitops/release/kustomization.yaml
+          sed -i -E "s/^([[:space:]]*newTag:).*/\1 ${TAG}/" "$FILE"
+          if git diff --quiet; then echo "Already at ${TAG}"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # [skip ci]: this commit only changes the tag; it must not rebuild.
+          git commit -am "gitops: deploy catalog-api ${TAG} [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          echo "GitOps: deployed tag \`${TAG}\`" >> "$GITHUB_STEP_SUMMARY"

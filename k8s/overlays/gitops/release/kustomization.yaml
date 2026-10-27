@@ -1,0 +1,40 @@
+# GitOps release overlay: what Argo CD deploys.
+#
+# Builds on the local overlay  but runs the
+# image CI pushed to ECR instead of a locally loaded one.
+#
+# The ONLY line that changes per release is `newTag` below: CI
+# commits the new tag, Argo CD sees the commit and rolls it out.
+# The registry host (it contains the AWS account ID) is NOT stored in Git;
+# Argo CD adds it at render time from the Application spec.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../local
+
+patches:
+  # Pull from the registry (the local overlay uses a pre-loaded image).
+  - target:
+      kind: Deployment
+      name: catalog-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+
+  # Credentials for pulling from private ECR. The `ecr-pull` Secret is created
+  # outside Git by scripts/gitops-setup.sh. On EKS this is unnecessary: nodes
+  # pull with their IAM role.
+  - target:
+      kind: ServiceAccount
+      name: catalog-api
+    patch: |-
+      - op: add
+        path: /imagePullSecrets
+        value:
+          - name: ecr-pull
+
+images:
+  - name: catalog-api
+    newTag: sha-c2f3a0a

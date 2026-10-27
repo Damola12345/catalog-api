@@ -1,0 +1,35 @@
+# Argo CD Application for catalog-api.
+#
+# Template: scripts/gitops-setup.sh fills in __REGISTRY__ (from your AWS login)
+# and __REVISION__ (the Git branch to track) and applies it. The registry is
+# substituted at apply time so the AWS account ID is never committed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: catalog-api
+  namespace: argocd
+  # Deleting the Application also deletes the resources it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Damola12345/catalog-api.git
+    targetRevision: __REVISION__
+    path: k8s/overlays/gitops
+    kustomize:
+      images:
+        - catalog-api=__REGISTRY__/catalog-api
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: catalog
+  syncPolicy:
+    automated:
+      prune: true      # resources removed from Git are removed from the cluster
+      selfHeal: true   # manual changes in the cluster are reverted to Git
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
