@@ -2,7 +2,7 @@
 
 A small REST API taken through the full onboarding path: **container → CI pipeline → Kubernetes → AWS infrastructure (Terraform)**. The app is deliberately minimal; the focus is everything around it.
 
-**Status: all parts working and verified.** CI is green and pushes to ECR via OIDC, the Terraform is applied in AWS, and the Kubernetes manifests pass 13/13 end-to-end checks on a local cluster. See [Evidence](#evidence).
+**Status: all parts working and verified.** CI is green and pushes to ECR via OIDC, the Terraform is applied in AWS, the Kubernetes manifests pass 13/13 end-to-end checks, and Argo CD deploys every new image automatically (GitOps). See [Evidence](#evidence).
 
 | Brief requirement | Where |
 |---|---|
@@ -11,6 +11,7 @@ A small REST API taken through the full onboarding path: **container → CI pipe
 | 3. Kubernetes manifests | [`k8s/base/`](k8s/base/) |
 | 4. Terraform (registry, CI role, state bucket) | [`terraform/`](terraform/) |
 | Migration question | [Importing an existing resource](#importing-an-existing-resource-into-terraform) |
+| Bonus: GitOps with Argo CD | [GitOps](#6-gitops-argo-cd) |
 | Assumptions and trade-offs | [Assumptions and trade-offs](#assumptions-and-trade-offs) |
 
 ```
@@ -19,7 +20,9 @@ docker/              Dockerfile, .dockerignore
 .github/workflows/   ci.yml
 k8s/base/            Deployment, Service, Ingress, NetworkPolicy, ConfigMap, Secret, PDB
 k8s/overlays/local/  small overrides for a local kind cluster
-scripts/             local-cluster-test.sh (end-to-end test)
+k8s/overlays/gitops/ what Argo CD deploys (image from ECR; tag bumped by CI)
+gitops/              Argo CD Application
+scripts/             local-cluster-test.sh (end-to-end test), gitops-setup.sh (Argo CD)
 terraform/           modules/ (ecr, github-oidc-ci-role, state-bucket), bootstrap/, live/
 docs/evidence/       screenshots and test log
 ```
@@ -48,16 +51,17 @@ On shutdown it stops accepting new traffic first, waits for in-flight requests, 
 
 ## 3. CI pipeline: `.github/workflows/ci.yml`
 
-Three jobs. The image is only built if the first two pass.
+Four jobs. Each one only runs if the previous ones pass.
 
 1. **Lint & test:** Go formatting, golangci-lint, unit tests.
 2. **Lint config:** Dockerfile (hadolint), Kubernetes manifests (kubeconform), Terraform (`fmt`/`validate`), Trivy misconfiguration scan.
 3. **Build, scan & push:** builds the image **once**, scans it with Trivy (fails on fixable HIGH/CRITICAL), then pushes **that same image** to ECR as `sha-<commit>`.
+4. **Bump GitOps tag:** commits the new tag to `k8s/overlays/gitops/release/kustomization.yaml`. Argo CD picks it up and deploys it (see [GitOps](#6-gitops-argo-cd)).
 
 | How to trigger | What runs |
 |---|---|
-| Pull request to `main` | Everything except the push |
-| Push or merge to `main` | Everything, including the push to ECR |
+| Pull request to `main` | Jobs 1–3, without the push |
+| Push or merge to `main` | All four: push to ECR, then commit the new tag for Argo CD |
 | Manual | Actions → **ci** → *Run workflow* on `main` |
 
 **Setup:** add three repository **secrets**: `AWS_REGION`, `AWS_ACCOUNT_ID`, `AWS_CI_ROLE_ARN` (values from `terraform -chdir=terraform/live output github_actions_variables`).
@@ -151,6 +155,40 @@ Goal: Terraform takes over the resource **as it is**, with no changes, downtime 
 
 Importing only updates Terraform's state; it never touches the live resource. The real risk is applying with config that doesn't match, which is why step 3 matters.
 
+## 6. GitOps: Argo CD
+
+CI never touches the cluster. It records **what** to run in Git, and Argo CD makes the cluster match.
+
+```
+push to main → CI builds, scans, pushes sha-abc1234 to ECR
+             → CI commits "newTag: sha-abc1234" to Git
+             → Argo CD sees the commit and rolls out the new image
+```
+
+- **Automatic sync, prune and self-heal:** Argo CD applies every change in Git, removes resources deleted from Git, and reverts manual changes made in the cluster.
+- **Rollback is a Git revert** of the tag-bump commit.
+- **No cluster credentials in CI.** The cluster pulls; nothing pushes into it.
+- **No account ID in Git.** Git holds only the image tag. Argo CD adds the ECR address when it renders the manifests, from the Application created by `scripts/gitops-setup.sh`.
+
+| File | Purpose |
+|---|---|
+| `k8s/overlays/gitops/release/kustomization.yaml` | What Argo CD deploys: the local overlay plus the ECR image. **`newTag` is the only line that changes per release** |
+| `k8s/overlays/gitops/kustomization.yaml` | Thin wrapper where Argo CD injects the registry, so it can't overwrite the tag |
+| `gitops/catalog-api-application.yaml` | The Argo CD Application (template) |
+| `scripts/gitops-setup.sh` | Installs Argo CD on the kind cluster and creates the Application |
+
+```bash
+./scripts/gitops-setup.sh               # install Argo CD and deploy from main
+./scripts/gitops-setup.sh refresh-ecr   # renew the ECR pull secret (expires after 12h)
+./scripts/gitops-setup.sh uninstall     # remove it
+
+# Argo CD UI
+kubectl -n argocd port-forward svc/argocd-server 8443:443   # https://localhost:8443, user: admin
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 --decode; echo
+```
+
+On a laptop, dex, notifications and ApplicationSets are scaled to zero to save memory. The ECR pull secret is only needed on kind; on EKS, nodes pull with their IAM role.
+
 ---
 
 ## Evidence
@@ -175,6 +213,12 @@ The test deployed the **exact image CI built, scanned and pushed to ECR** (`sha-
 | 7 | ECR repository (immutable tags, scan on push), lifecycle policy and pushed images | [07-ecr](docs/evidence/07-ecr.png) |
 | 8 | Terraform state bucket: versioning, encryption, public access blocked | [08-s3-state](docs/evidence/08-s3-state.png) |
 
+### GitOps
+
+| # | What it proves | Screenshot |
+|---|---|---|
+| 9 | Argo CD **Synced / Healthy** on `main`, deployed from a commit made by CI (`github-actions[bot]`: `gitops: deploy catalog-api sha-e17022e`); all 10 resources green, Deployment at revision 2 after an automatic rollout | [09-argocd](docs/evidence/09-argocd.png) |
+
 ---
 
 ## Assumptions and trade-offs
@@ -185,8 +229,9 @@ The test deployed the **exact image CI built, scanned and pushed to ECR** (`sha-
 
 **Shortcuts taken on purpose**
 - **The app is a stub:** data is in memory, so replicas don't share it. A real service would add a database.
-- **CI builds and pushes, but doesn't deploy.** In production I'd use GitOps (Argo CD) so CI never needs cluster credentials.
-- **One Kustomize base**, with no dev/staging/prod overlays yet.
+- **CI commits the tag bump straight to `main`.** Fine for one service. With several teams I'd keep manifests in a separate config repo and have CI open a pull request, so production deploys get a review.
+- **One environment.** No dev/staging/prod overlays yet; promotion would mean copying a tested tag from one overlay to the next.
+- **The GitOps demo runs on kind with a 12-hour ECR pull secret.** On EKS the node IAM role replaces it.
 - **No autoscaling:** fixed 2 replicas until there's real load data.
 - **AWS-managed encryption keys** rather than customer-managed KMS keys (the modules support either).
 - **Actions pinned to version tags, not commit SHAs.** Dependabot keeps them updated.
@@ -195,5 +240,6 @@ The test deployed the **exact image CI built, scanned and pushed to ECR** (`sha-
 **Lesson from the first CI run:** the vulnerability scan blocked the first push on 22 Go standard-library CVEs. Upgrading the build toolchain fixed it with no code changes, which is the gate doing its job.
 
 ## Next steps
-- **GitOps:** Argo CD watches the manifests; CI opens a PR to bump the image tag.
+- **Environments and promotion:** dev/staging/prod overlays, each its own Argo CD Application; promote by moving a tested tag forward.
+- **Progressive delivery:** Argo Rollouts canary releases, rolled back automatically if error rates rise.
 - **Observability:** Prometheus metrics, OpenTelemetry traces, SLO-based alerts. Logs are already structured JSON.
