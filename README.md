@@ -27,8 +27,6 @@ terraform/           modules/ (ecr, github-oidc-ci-role, state-bucket), bootstra
 docs/evidence/       screenshots and test log
 ```
 
----
-
 ## 1. The app
 
 Go, standard library only, in-memory data.
@@ -189,8 +187,6 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 
 On a laptop, dex, notifications and ApplicationSets are scaled to zero to save memory. The ECR pull secret is only needed on kind; on EKS, nodes pull with their IAM role.
 
----
-
 ## Evidence
 
 ### Kubernetes: local cluster test, 13/13 passed
@@ -218,8 +214,6 @@ The test deployed the **exact image CI built, scanned and pushed to ECR** (`sha-
 | # | What it proves | Screenshot |
 |---|---|---|
 | 9 | Argo CD **Synced / Healthy** on `main`, deployed from a commit made by CI (`github-actions[bot]`: `gitops: deploy catalog-api sha-e17022e`); all 10 resources green, Deployment at revision 2 after an automatic rollout | [09-argocd](docs/evidence/09-argocd.png) |
-
----
 
 ## Assumptions and trade-offs
 
