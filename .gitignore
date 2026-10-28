@@ -1,0 +1,31 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+terraform.tfvars
+terraform.lock.hcl
+backend.hcl
+backend.hcl.example
+override.tf
+override.tf.json
+*_override.tf
+
+# Personal notes
+command.yml
+
+# Go
+app/coverage.out
+app/server
+/bin/
+
+# Local env / secrets
+.env
+*.pem
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

@@ -1,9 +1,7 @@
 # Bootstrap root: creates the remote-state bucket that every other root uses.
-#
-# Chicken-and-egg: the bucket can't hold its own state before it exists, so
+# the bucket can't hold its own state before it exists, so
 # the first apply uses local state. After that, uncomment the backend block
 # below and run `terraform init -migrate-state` to move this root's state into
-# the bucket it just created. See README → Terraform → Bootstrap.
 
 terraform {
   required_version = ">= 1.10"
