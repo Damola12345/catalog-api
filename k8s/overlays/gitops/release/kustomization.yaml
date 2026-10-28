@@ -37,4 +37,4 @@ patches:
 
 images:
   - name: catalog-api
-    newTag: sha-315c48e
+    newTag: sha-257161a
