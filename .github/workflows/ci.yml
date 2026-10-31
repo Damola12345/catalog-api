@@ -34,7 +34,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: hadolint
         uses: hadolint/hadolint-action@v3.1.0
@@ -113,7 +113,7 @@ jobs:
       id-token: write         # GitHub OIDC to AWS STS (no long-lived keys)
       security-events: write  # upload Trivy SARIF to the Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compute image tags
         id: meta
@@ -216,7 +216,7 @@ jobs:
     permissions:
       contents: write   # push the tag-bump commit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Commit the new image tag
         run: |
